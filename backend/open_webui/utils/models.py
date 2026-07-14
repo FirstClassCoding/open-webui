@@ -195,6 +195,7 @@ async def get_all_models(request, refresh: bool = False, user: UserModel = None)
                 'preset': True,
                 **({'pipe': pipe} if pipe is not None else {}),
                 **({'provider': base_model.get('provider')} if base_model and base_model.get('provider') else {}),
+                'gateway_search_mode': bool(base_model and base_model.get('gateway_search_mode', False)),
                 **({'loaded': base_model.get('loaded')} if base_model and base_model.get('loaded') is not None else {}),
             }
 

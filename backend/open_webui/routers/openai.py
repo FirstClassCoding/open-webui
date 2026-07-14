@@ -42,6 +42,7 @@ from open_webui.models.users import UserModel
 from open_webui.utils.access_control import check_model_access, has_connection_access, has_permission
 from open_webui.utils.anthropic import get_anthropic_models, is_anthropic_url
 from open_webui.utils.auth import get_admin_user, get_verified_user
+from open_webui.utils.gateway_search import apply_gateway_search_mode
 from open_webui.utils.headers import get_custom_headers, include_user_info_headers
 from open_webui.utils.misc import (
     convert_logit_bias_input_to_json,
@@ -488,6 +489,9 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
             prefix_id = api_config.get('prefix_id', None)
             tags = api_config.get('tags', [])
             provider = api_config.get('provider', '')
+            gateway_search_mode = bool(api_config.get('gateway_search_mode', False)) and api_config.get(
+                'api_type'
+            ) != 'responses'
 
             model_list = response if isinstance(response, list) else response.get('data', [])
             if not isinstance(model_list, list):
@@ -510,6 +514,8 @@ async def get_all_models_responses(request: Request, user: UserModel) -> list:
 
                 if provider:
                     model['provider'] = provider
+
+                model['gateway_search_mode'] = gateway_search_mode
 
     log.debug(f'get_all_models:responses() {responses}')
     return responses
@@ -1203,6 +1209,10 @@ async def generate_chat_completion(
     headers, cookies = await get_headers_and_cookies(request, url, key, api_config, metadata, user=user)
 
     is_responses = api_config.get('api_type') == 'responses'
+    payload = apply_gateway_search_mode(
+        payload,
+        enabled=bool(api_config.get('gateway_search_mode', False)) and not is_responses,
+    )
 
     if api_config.get('azure') or api_config.get('provider') == 'azure':
         # Only set api-key header if not using Azure Entra ID authentication

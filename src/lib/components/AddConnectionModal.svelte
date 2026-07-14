@@ -48,6 +48,7 @@
 	let enable = true;
 	let apiVersion = '';
 	let apiType = ''; // '' = chat completions (default), 'responses' = Responses API
+	let gatewaySearchMode = false;
 
 	let headers = '';
 
@@ -194,7 +195,10 @@
 				...(provider ? { provider } : {}),
 				...(!ollama && azure ? { azure: true } : {}),
 				...(azure ? { api_version: apiVersion } : {}),
-				...(apiType ? { api_type: apiType } : {})
+				...(apiType ? { api_type: apiType } : {}),
+				...(!ollama && !direct
+					? { gateway_search_mode: apiType !== 'responses' && gatewaySearchMode }
+					: {})
 			}
 		};
 
@@ -209,6 +213,7 @@
 		prefixId = '';
 		tags = [];
 		modelIds = [];
+		gatewaySearchMode = false;
 	};
 
 	const init = () => {
@@ -233,6 +238,7 @@
 				provider = connection.config?.provider ?? (connection.config?.azure ? 'azure' : '');
 				apiVersion = connection.config?.api_version ?? '';
 				apiType = connection.config?.api_type ?? '';
+				gatewaySearchMode = connection.config?.gateway_search_mode ?? false;
 			}
 		}
 	};
@@ -514,6 +520,21 @@
 									</select>
 								</div>
 							</div>
+
+							{#if apiType !== 'responses'}
+								<div class="flex flex-row justify-between items-center w-full mt-2">
+									<label
+										for="gateway-search-mode-toggle"
+										class={`text-xs ${($settings?.highContrastMode ?? false) ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500'}`}
+									>
+										{$i18n.t('Gateway Web Search')}
+									</label>
+
+									<Tooltip content={$i18n.t('Enable Gateway Web Search modes for this connection')}>
+										<Switch id="gateway-search-mode-toggle" bind:state={gatewaySearchMode} />
+									</Tooltip>
+								</div>
+							{/if}
 						{/if}
 
 						{#if azure}

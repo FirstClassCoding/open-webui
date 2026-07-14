@@ -192,6 +192,12 @@ async def generate_chat_completion(
         raise Exception('Model not found')
 
     model = models[model_id]
+    if (
+        getattr(request.state, 'direct', False)
+        or model.get('owned_by') != 'openai'
+        or model.get('pipe')
+    ):
+        form_data.pop('search_mode', None)
 
     if getattr(request.state, 'direct', False) and model_id == getattr(request.state, 'model', {}).get('id'):
         return await generate_direct_chat_completion(request, form_data, user=user, models=models)

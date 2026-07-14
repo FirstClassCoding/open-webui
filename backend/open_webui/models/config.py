@@ -43,6 +43,7 @@ API_CONFIG_FIELDS = (
     'model_ids',
     'connection_type',
     'provider',
+    'gateway_search_mode',
     'auth_type',
     'headers',
     'azure',

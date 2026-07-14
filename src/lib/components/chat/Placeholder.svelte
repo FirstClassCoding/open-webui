@@ -27,6 +27,7 @@
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import EyeSlash from '$lib/components/icons/EyeSlash.svelte';
 	import MessageInput from './MessageInput.svelte';
+	import type { GatewaySearchMode } from '$lib/utils/gatewaySearchMode';
 	import FolderPlaceholder from './Placeholder/FolderPlaceholder.svelte';
 	import FolderTitle from './Placeholder/FolderTitle.svelte';
 
@@ -56,6 +57,8 @@
 	export let imageGenerationEnabled = false;
 	export let codeInterpreterEnabled = false;
 	export let webSearchEnabled = false;
+	export let gatewaySearchMode: GatewaySearchMode = 'off';
+	export let gatewaySearchAvailable = false;
 
 	export let onUpload: Function = (e) => {};
 	export let onSelect = (e) => {};
@@ -235,6 +238,8 @@
 						bind:imageGenerationEnabled
 						bind:codeInterpreterEnabled
 						bind:webSearchEnabled
+						bind:gatewaySearchMode
+						{gatewaySearchAvailable}
 						bind:atSelectedModel
 						bind:showCommands
 						bind:dragged

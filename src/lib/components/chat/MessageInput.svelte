@@ -104,6 +104,8 @@
 	import Expand from '../icons/Expand.svelte';
 	import QueuedMessageItem from './MessageInput/QueuedMessageItem.svelte';
 	import TaskList from './Messages/ResponseMessage/TaskList.svelte';
+	import GatewaySearchMenu from './MessageInput/GatewaySearchMenu.svelte';
+	import type { GatewaySearchMode } from '$lib/utils/gatewaySearchMode';
 
 	const i18n = getContext('i18n');
 
@@ -141,6 +143,8 @@
 
 	export let imageGenerationEnabled = false;
 	export let webSearchEnabled = false;
+	export let gatewaySearchMode: GatewaySearchMode = 'off';
+	export let gatewaySearchAvailable = false;
 	export let codeInterpreterEnabled = false;
 
 	export let pendingOAuthTools = [];
@@ -186,6 +190,7 @@
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
+		gatewaySearchMode,
 		codeInterpreterEnabled
 	});
 
@@ -1747,13 +1752,17 @@
 										</button>
 									</InputMenu>
 
-									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
+									{#if gatewaySearchAvailable || showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
 										<div
 											class="flex self-center w-[1px] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50 shrink-0"
 										/>
 									{/if}
 
 									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
+										{#if gatewaySearchAvailable}
+											<GatewaySearchMenu bind:mode={gatewaySearchMode} />
+										{/if}
+
 										{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
 											<IntegrationsMenu
 												selectedModels={selectedModelIds}

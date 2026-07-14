@@ -141,6 +141,7 @@ export interface OpenAIModel extends BaseModel {
 	owned_by: 'openai';
 	external: boolean;
 	source?: string;
+	gateway_search_mode?: boolean;
 }
 
 export interface OllamaModel extends BaseModel {

@@ -68,6 +68,12 @@
 		displayFileHandler
 	} from '$lib/utils';
 	import { AudioQueue } from '$lib/utils/audio';
+	import {
+		getGatewaySearchModeField,
+		normalizeGatewaySearchMode,
+		supportsGatewaySearchMode,
+		type GatewaySearchMode
+	} from '$lib/utils/gatewaySearchMode';
 	import { getOutputText } from './Messages/structuredOutput';
 
 	import {
@@ -161,6 +167,8 @@
 
 	let imageGenerationEnabled = false;
 	let webSearchEnabled = false;
+	let gatewaySearchMode: GatewaySearchMode = 'off';
+	let gatewaySearchAvailable = false;
 	let codeInterpreterEnabled = false;
 	let webSearchActive = false;
 	let showWebSearchConfirm = false;
@@ -181,6 +189,12 @@
 				(allModelsSupportWebSearch && ($settings?.webSearch ?? false) === 'always'))
 		);
 	}
+
+	$: gatewaySearchAvailable =
+		selectedModelIds.length > 0 &&
+		selectedModelIds.every((id) =>
+			supportsGatewaySearchMode($models.find((model) => model.id === id))
+		);
 
 	const openWebSearchConfirm = () => {
 		window.setTimeout(() => {
@@ -239,7 +253,14 @@
 	}
 
 	let saveControlsTimer;
-	$: if (!loading && !$temporaryChatEnabled && $chatId && params && chatFiles) {
+	$: if (
+		!loading &&
+		!$temporaryChatEnabled &&
+		$chatId &&
+		params &&
+		chatFiles &&
+		gatewaySearchMode
+	) {
 		clearTimeout(saveControlsTimer);
 		saveControlsTimer = setTimeout(saveControls, 400);
 	}
@@ -263,6 +284,7 @@
 		selectedSkillIds = [];
 		selectedFilterIds = [];
 		webSearchEnabled = false;
+		gatewaySearchMode = 'off';
 		imageGenerationEnabled = false;
 
 		const storageChatInput = sessionStorage.getItem(
@@ -299,6 +321,7 @@
 						selectedSkillIds = input.selectedSkillIds ?? [];
 						selectedFilterIds = input.selectedFilterIds;
 						webSearchEnabled = input.webSearchEnabled;
+						gatewaySearchMode = normalizeGatewaySearchMode(input.gatewaySearchMode);
 						imageGenerationEnabled = input.imageGenerationEnabled;
 						codeInterpreterEnabled = input.codeInterpreterEnabled;
 					}
@@ -1018,6 +1041,7 @@
 						selectedSkillIds = input.selectedSkillIds ?? [];
 						selectedFilterIds = input.selectedFilterIds;
 						webSearchEnabled = input.webSearchEnabled;
+						gatewaySearchMode = normalizeGatewaySearchMode(input.gatewaySearchMode);
 						imageGenerationEnabled = input.imageGenerationEnabled;
 						codeInterpreterEnabled = input.codeInterpreterEnabled;
 					}
@@ -1464,6 +1488,7 @@
 		autoScroll = true;
 
 		await resetInput();
+		gatewaySearchMode = 'off';
 		await chatId.set('');
 		await chatTitle.set('');
 
@@ -1629,6 +1654,7 @@
 				chatTitle.set(chatContent.title);
 
 				params = structuredClone(chatContent?.params ?? {});
+				gatewaySearchMode = normalizeGatewaySearchMode(chatContent?.gateway_search_mode);
 				chatFiles = structuredClone(chatContent?.files ?? []);
 
 				// Load tasks from chat-level DB field
@@ -1808,6 +1834,7 @@
 					messages: messages,
 					history: history,
 					params: params,
+					gateway_search_mode: gatewaySearchMode,
 					files: chatFiles
 				});
 
@@ -2550,6 +2577,7 @@
 			{
 				stream: stream,
 				model: model.id,
+				...getGatewaySearchModeField(selectedModelIds, $models, gatewaySearchMode),
 				...(messages.length > 0 ? { messages } : {}),
 				params: {
 					...$settings?.params,
@@ -2662,9 +2690,10 @@
 						// params) that the backend doesn't receive in the
 						// chat completion request.  Files are now persisted
 						// by the backend at chat creation time.
-						if (Object.keys(params).length > 0) {
+						if (Object.keys(params).length > 0 || gatewaySearchMode !== 'off') {
 							await updateChatById(localStorage.token, res.chat_id, {
-								params: params
+								params: params,
+								gateway_search_mode: gatewaySearchMode
 							});
 						}
 					}
@@ -2920,6 +2949,7 @@
 					models: selectedModels,
 					system: $settings.system ?? undefined,
 					params: params,
+					gateway_search_mode: gatewaySearchMode,
 					history: history,
 					messages: createMessagesList(history, history.currentId),
 					tags: [],
@@ -2956,6 +2986,7 @@
 					history: history,
 					messages: createMessagesList(history, history.currentId),
 					params: params,
+					gateway_search_mode: gatewaySearchMode,
 					files: chatFiles
 				});
 			}
@@ -2965,10 +2996,16 @@
 	const saveControls = async () => {
 		if (!$chatId || $temporaryChatEnabled) return;
 		const loaded = chat?.chat ?? {};
-		if (equal(params, loaded.params ?? {}) && equal(chatFiles, loaded.files ?? [])) return;
+		if (
+			equal(params, loaded.params ?? {}) &&
+			equal(chatFiles, loaded.files ?? []) &&
+			gatewaySearchMode === normalizeGatewaySearchMode(loaded.gateway_search_mode)
+		)
+			return;
 
 		const res = await updateChatById(localStorage.token, $chatId, {
 			params,
+			gateway_search_mode: gatewaySearchMode,
 			files: chatFiles
 		}).catch((err) => {
 			console.error('[controls autosave]', err);
@@ -3215,6 +3252,7 @@
 										title: title.length > 50 ? `${title.slice(0, 50)}...` : title,
 										models: selectedModels,
 										params: params,
+										gateway_search_mode: gatewaySearchMode,
 										history: history,
 										messages: messages,
 										timestamp: Date.now()
@@ -3301,6 +3339,8 @@
 										bind:codeInterpreterEnabled
 										{pendingOAuthTools}
 										bind:webSearchEnabled
+										bind:gatewaySearchMode
+										{gatewaySearchAvailable}
 										bind:atSelectedModel
 										bind:showCommands
 										bind:dragged
@@ -3384,6 +3424,8 @@
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
 									bind:webSearchEnabled
+									bind:gatewaySearchMode
+									{gatewaySearchAvailable}
 									bind:atSelectedModel
 									bind:showCommands
 									bind:dragged
