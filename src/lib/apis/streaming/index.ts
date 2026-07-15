@@ -1,15 +1,17 @@
 import { EventSourceParserStream } from 'eventsource-parser/stream';
 import type { ParsedEvent } from 'eventsource-parser';
 
-type TextStreamUpdate = {
+export type TextStreamUpdate = {
 	done: boolean;
 	value: string;
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	sources?: any;
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	selectedModelId?: any;
-	error?: any;
+	error?: unknown;
 	usage?: ResponseUsage;
+	providerMetadata?: Record<string, unknown>;
+	gatewayMetadata?: Record<string, unknown>;
 };
 
 type ResponseUsage = {
@@ -22,6 +24,9 @@ type ResponseUsage = {
 	/** Any other fields that aren't part of the base OpenAI spec */
 	[other: string]: unknown;
 };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === 'object' && value !== null && !Array.isArray(value);
 
 // createOpenAITextStream takes a responseBody with a SSE response,
 // and returns an async generator that emits delta updates with large deltas chunked into random sized chunks
@@ -77,15 +82,29 @@ async function* openAIStreamToIterator(
 				continue;
 			}
 
-			if (parsedData.usage) {
-				yield { done: false, value: '', usage: parsedData.usage };
-				continue;
+			const usage = isRecord(parsedData.usage) ? (parsedData.usage as ResponseUsage) : undefined;
+			const providerMetadata = isRecord(parsedData.metadata) ? parsedData.metadata : undefined;
+			const gatewayMetadata = isRecord(parsedData.gateway_metadata)
+				? parsedData.gateway_metadata
+				: undefined;
+
+			if (usage || providerMetadata || gatewayMetadata) {
+				yield {
+					done: false,
+					value: '',
+					usage,
+					providerMetadata,
+					gatewayMetadata
+				};
 			}
 
-			yield {
-				done: false,
-				value: parsedData.choices?.[0]?.delta?.content ?? ''
-			};
+			const content = parsedData.choices?.[0]?.delta?.content ?? '';
+			if (content) {
+				yield {
+					done: false,
+					value: content
+				};
+			}
 		} catch (e) {
 			console.error('Error extracting delta from SSE event:', e);
 		}
@@ -115,7 +134,11 @@ async function* streamLargeDeltasAsRandomChunks(
 			yield textStreamUpdate;
 			continue;
 		}
-		if (textStreamUpdate.usage) {
+		if (
+			textStreamUpdate.usage ||
+			textStreamUpdate.providerMetadata ||
+			textStreamUpdate.gatewayMetadata
+		) {
 			yield textStreamUpdate;
 			continue;
 		}

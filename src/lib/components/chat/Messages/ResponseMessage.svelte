@@ -30,7 +30,6 @@
 		copyToClipboard as _copyToClipboard,
 		approximateToHumanReadable,
 		getMessageContentParts,
-		sanitizeResponseContent,
 		createMessagesList,
 		formatDate,
 		removeDetails,
@@ -65,6 +64,17 @@
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 	import OutputEditView from './OutputEditView.svelte';
 	import { getOutputText, replaceOutputMessageText, type OutputItem } from './structuredOutput';
+	import GatewayResponseMetadata from './ResponseMessage/GatewayResponseMetadata.svelte';
+	import ResponseMetrics from './ResponseMessage/ResponseMetrics.svelte';
+	import {
+		formatDuration,
+		formatIdentifier,
+		getGatewaySearchStatusKey,
+		getGatewaySearchStatusLabelKey,
+		getResponseMetricDetails,
+		hasResponseDetails,
+		normalizeGatewayCompletionMetadata
+	} from '$lib/utils/gatewayCompletionMetadata';
 
 	interface MessageType {
 		id: string;
@@ -115,6 +125,9 @@
 			load_duration?: number;
 			usage?: unknown;
 		};
+		usage?: Record<string, unknown>;
+		provider_metadata?: Record<string, unknown>;
+		gateway_metadata?: Record<string, unknown>;
 		annotation?: { type: string; rating: number };
 	}
 
@@ -175,7 +188,115 @@
 
 	let model = null;
 	$: model = $models.find((m) => m.id === message.model);
+	$: gatewayCompletionMetadata = normalizeGatewayCompletionMetadata({
+		usage: message.usage,
+		info: message.info,
+		provider_metadata: message.provider_metadata,
+		gateway_metadata: message.gateway_metadata
+	});
 
+	type Translate = (key: string, options?: Record<string, unknown>) => string;
+	type CompletionMetadataView = ReturnType<typeof normalizeGatewayCompletionMetadata>;
+
+	const escapeTooltipHtml = (value: unknown) =>
+		String(value)
+			.replace(/&/g, '&amp;')
+			.replace(/</g, '&lt;')
+			.replace(/>/g, '&gt;')
+			.replace(/"/g, '&quot;')
+			.replace(/'/g, '&#039;');
+
+	const getModeLabel = (mode: string | undefined, translate: Translate) => {
+		if (mode === 'off') return translate('Off');
+		if (mode === 'on') return translate('On');
+		if (mode === 'auto') return translate('Auto');
+		return formatIdentifier(mode);
+	};
+
+	const getReasonLabel = (reason: string | undefined, translate: Translate) => {
+		const labels: Record<string, string> = {
+			market_signal: 'Market/current-price question',
+			general_knowledge: 'General knowledge; search skipped',
+			requested_on: 'Search requested',
+			requested_off: 'Search disabled',
+			explicit_search_request: 'Explicit web search request',
+			recency_signal: 'Current or recent information',
+			auto_search_failed_fallback: 'Search failed; used direct model response'
+		};
+		return reason ? translate(labels[reason] ?? formatIdentifier(reason) ?? reason) : undefined;
+	};
+
+	const renderTooltipSection = (title: string | undefined, rows: Array<[string, unknown]>) => {
+		const visibleRows = rows.filter(([, value]) => value !== undefined && value !== '');
+		if (visibleRows.length === 0) return '';
+
+		return `<div>${title ? `<div class="font-semibold">${escapeTooltipHtml(title)}</div>` : ''}${visibleRows
+			.map(
+				([label, value]) =>
+					`<div><span class="font-medium">${escapeTooltipHtml(label)}:</span> ${escapeTooltipHtml(value)}</div>`
+			)
+			.join('')}</div>`;
+	};
+
+	const buildResponseDetailsTooltip = ({
+		completionMetadata,
+		modelName,
+		timestampLabel,
+		locale,
+		translate
+	}: {
+		completionMetadata: CompletionMetadataView;
+		modelName?: string;
+		timestampLabel?: string;
+		locale?: string;
+		translate: Translate;
+	}) => {
+		const metricRows = getResponseMetricDetails(completionMetadata.metrics, locale).map(
+			(detail): [string, string] => [translate(detail.label), detail.value]
+		);
+		const responseSection = renderTooltipSection(undefined, [
+			[translate('Model'), modelName],
+			[translate('Created at'), timestampLabel],
+			...metricRows
+		]);
+		const search = completionMetadata.search;
+		const searchStatus = getGatewaySearchStatusKey(search);
+		const resultCount =
+			search?.resultCount ??
+			(search && search.sources.length > 0 ? search.sources.length : undefined);
+		const searchSection = search
+			? renderTooltipSection(translate('Gateway Web Search'), [
+					[translate('Requested mode'), getModeLabel(search.requestedMode, translate)],
+					[translate('Resolved mode'), getModeLabel(search.resolvedMode, translate)],
+					[
+						translate('Search status'),
+						searchStatus
+							? translate(getGatewaySearchStatusLabelKey(searchStatus))
+							: formatIdentifier(search.searchStatus)
+					],
+					[translate('Decision reason'), getReasonLabel(search.decisionReason, translate)],
+					[translate('Sources'), resultCount?.toLocaleString(locale)],
+					[translate('Search time'), formatDuration(search.searchDurationMs)]
+				])
+			: '';
+
+		return `<div class="text-left space-y-2">${responseSection}${searchSection}</div>`;
+	};
+
+	$: showResponseDetails = hasResponseDetails(gatewayCompletionMetadata);
+	$: responseTimestampLabel = message.timestamp
+		? $i18n.t(formatDate(message.timestamp * 1000), {
+				LOCALIZED_TIME: dayjs(message.timestamp * 1000).format('LT'),
+				LOCALIZED_DATE: dayjs(message.timestamp * 1000).format('L')
+			})
+		: undefined;
+	$: responseDetailsTooltipContent = buildResponseDetailsTooltip({
+		completionMetadata: gatewayCompletionMetadata,
+		modelName: model?.name ?? message.model,
+		timestampLabel: responseTimestampLabel,
+		locale: $i18n.language,
+		translate: $i18n.t.bind($i18n)
+	});
 	$: statusEntries = message?.statusHistory ?? [...(message?.status ? [message?.status] : [])];
 	$: hasVisibleStatus =
 		(model?.info?.meta?.capabilities?.status_updates ?? true) &&
@@ -688,6 +809,12 @@
 				{/if}
 			</Name>
 
+			<ResponseMetrics
+				metrics={gatewayCompletionMetadata.metrics}
+				locale={$i18n.language}
+				translate={$i18n.t.bind($i18n)}
+			/>
+
 			<div>
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
 					<div>
@@ -896,6 +1023,10 @@
 									sources={message?.sources ?? message?.citations}
 									{readOnly}
 								/>
+							{/if}
+
+							{#if gatewayCompletionMetadata.search}
+								<GatewayResponseMetadata search={gatewayCompletionMetadata.search} />
 							{/if}
 
 							{#if message.code_executions}
@@ -1157,23 +1288,15 @@
 									</Tooltip>
 								{/if}
 
-								{#if message.usage}
+								{#if showResponseDetails}
 									<Tooltip
-										content={message.usage
-											? `<pre>${sanitizeResponseContent(
-													JSON.stringify(message.usage, null, 2)
-														.replace(/"([^(")"]+)":/g, '$1:')
-														.slice(1, -1)
-														.split('\n')
-														.map((line) => line.slice(2))
-														.map((line) => (line.endsWith(',') ? line.slice(0, -1) : line))
-														.join('\n')
-												)}</pre>`
-											: ''}
+										content={responseDetailsTooltipContent}
 										placement="bottom"
+										tippyOptions={{ trigger: 'mouseenter focusin click' }}
 									>
 										<button
-											aria-hidden="true"
+											type="button"
+											aria-label={$i18n.t('Response details')}
 											class=" {isLastMessage || ($settings?.highContrastMode ?? false)
 												? 'visible'
 												: 'invisible group-hover:visible'} p-1.5 hover:bg-black/5 dark:hover:bg-white/5 rounded-lg dark:hover:text-white hover:text-black transition whitespace-pre-wrap"

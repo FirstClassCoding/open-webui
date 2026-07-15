@@ -87,6 +87,10 @@ from open_webui.utils.filter import (
     get_sorted_filter_ids,
     process_filter_functions,
 )
+from open_webui.utils.gateway_response import (
+    completion_metadata_to_response_fields,
+    normalize_completion_metadata,
+)
 
 from open_webui.utils.mcp.client import MCPClient
 from open_webui.utils.memory import add_memory_context, review_memory_after_turn
@@ -3429,6 +3433,9 @@ async def non_streaming_chat_response_handler(response, ctx):
     if response_data is None:
         return response
 
+    completion_metadata = normalize_completion_metadata(response_data)
+    completion_response_fields = completion_metadata_to_response_fields(completion_metadata)
+
     if event_emitter:
         try:
             if 'error' in response_data:
@@ -3527,6 +3534,7 @@ async def non_streaming_chat_response_handler(response, ctx):
                                 'done': True,
                                 'output': response_output,
                                 'title': title,
+                                **completion_response_fields,
                             },
                         }
                     )
@@ -3543,6 +3551,7 @@ async def non_streaming_chat_response_handler(response, ctx):
                                 'role': 'assistant',
                                 'output': response_output,
                                 **({'usage': usage} if usage else {}),
+                                **completion_metadata,
                             },
                         )
 
@@ -3567,6 +3576,7 @@ async def non_streaming_chat_response_handler(response, ctx):
                         'content': content,
                         'output': response_output,
                         **({'usage': usage} if usage else {}),
+                        **completion_metadata,
                     }
                     await outlet_filter_handler(ctx)
                     await background_tasks_handler(ctx)
@@ -3892,6 +3902,8 @@ async def streaming_chat_response_handler(response, ctx):
                     output = []
 
             usage = None
+            provider_response_metadata = None
+            gateway_response_metadata = None
             prior_output = []
             last_response_id = None
 
@@ -3949,6 +3961,8 @@ async def streaming_chat_response_handler(response, ctx):
                 async def stream_body_handler(response, form_data):
                     nonlocal content
                     nonlocal usage
+                    nonlocal provider_response_metadata
+                    nonlocal gateway_response_metadata
                     nonlocal output
                     nonlocal prior_output
                     nonlocal last_response_id
@@ -4041,6 +4055,12 @@ async def streaming_chat_response_handler(response, ctx):
                             )
 
                             if data:
+                                completion_metadata_update = normalize_completion_metadata(data)
+                                if completion_metadata_update.get('provider_metadata'):
+                                    provider_response_metadata = completion_metadata_update['provider_metadata']
+                                if completion_metadata_update.get('gateway_metadata'):
+                                    gateway_response_metadata = completion_metadata_update['gateway_metadata']
+
                                 if 'event' in data and not getattr(request.state, 'direct', False):
                                     await event_emitter(data.get('event', {}))
 
@@ -4146,18 +4166,22 @@ async def streaming_chat_response_handler(response, ctx):
                                     continue
                                 else:
                                     choices = data.get('choices', [])
+                                    completion_event_data = completion_metadata_to_response_fields(
+                                        completion_metadata_update
+                                    )
 
                                     # Normalize usage data to standard format
                                     raw_usage = data.get('usage', {}) or {}
                                     raw_usage.update(data.get('timings', {}))  # llama.cpp
                                     if raw_usage:
                                         usage = merge_usage(usage, raw_usage)
+                                        completion_event_data['usage'] = usage
+
+                                    if completion_event_data:
                                         await event_emitter(
                                             {
                                                 'type': 'chat:completion',
-                                                'data': {
-                                                    'usage': usage,
-                                                },
+                                                'data': completion_event_data,
                                             }
                                         )
 
@@ -5220,6 +5244,33 @@ async def streaming_chat_response_handler(response, ctx):
                     'output': output,
                     'title': title,
                     **({'usage': usage} if usage else {}),
+                    **completion_metadata_to_response_fields(
+                        {
+                            **(
+                                {'provider_metadata': provider_response_metadata}
+                                if provider_response_metadata
+                                else {}
+                            ),
+                            **(
+                                {'gateway_metadata': gateway_response_metadata}
+                                if gateway_response_metadata
+                                else {}
+                            ),
+                        }
+                    ),
+                }
+
+                message_completion_metadata = {
+                    **(
+                        {'provider_metadata': provider_response_metadata}
+                        if provider_response_metadata
+                        else {}
+                    ),
+                    **(
+                        {'gateway_metadata': gateway_response_metadata}
+                        if gateway_response_metadata
+                        else {}
+                    ),
                 }
 
                 if not metadata.get('chat_id', '').startswith('channel:'):
@@ -5232,13 +5283,18 @@ async def streaming_chat_response_handler(response, ctx):
                                 'done': True,
                                 'output': output,
                                 **({'usage': usage} if usage else {}),
+                                **message_completion_metadata,
                             },
                         )
-                    elif usage:
+                    elif usage or message_completion_metadata:
                         await Chats.upsert_message_to_chat_by_id_and_message_id(
                             metadata['chat_id'],
                             metadata['message_id'],
-                            {'done': True, 'usage': usage},
+                            {
+                                'done': True,
+                                **({'usage': usage} if usage else {}),
+                                **message_completion_metadata,
+                            },
                         )
                     else:
                         await Chats.upsert_message_to_chat_by_id_and_message_id(
@@ -5274,6 +5330,7 @@ async def streaming_chat_response_handler(response, ctx):
                 ctx['assistant_message'] = {
                     'output': output,
                     **({'usage': usage} if usage else {}),
+                    **message_completion_metadata,
                 }
                 await outlet_filter_handler(ctx)
                 await background_tasks_handler(ctx)

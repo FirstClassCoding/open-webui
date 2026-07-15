@@ -74,6 +74,7 @@
 		supportsGatewaySearchMode,
 		type GatewaySearchMode
 	} from '$lib/utils/gatewaySearchMode';
+	import { applyGatewayCompletionMetadata } from '$lib/utils/gatewayCompletionMetadata';
 	import { getOutputText } from './Messages/structuredOutput';
 
 	import {
@@ -1983,7 +1984,19 @@
 	};
 
 	const chatCompletionEventHandler = async (data, message, chatId) => {
-		const { id, done, choices, content, output, sources, selected_model_id, error, usage } = data;
+		const {
+			id,
+			done,
+			choices,
+			content,
+			output,
+			sources,
+			selected_model_id,
+			error,
+			usage,
+			metadata,
+			gateway_metadata
+		} = data;
 
 		// Store raw OR-aligned output items from backend
 		if (output) {
@@ -2036,9 +2049,7 @@
 			message.arena = true;
 		}
 
-		if (usage) {
-			message.usage = usage;
-		}
+		applyGatewayCompletionMetadata(message, { usage, metadata, gateway_metadata });
 
 		history.messages[message.id] = message;
 
