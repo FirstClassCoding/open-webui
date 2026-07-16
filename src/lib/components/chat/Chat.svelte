@@ -69,9 +69,11 @@
 	} from '$lib/utils';
 	import { AudioQueue } from '$lib/utils/audio';
 	import {
-		getGatewaySearchModeField,
+		getChatSearchRequestPolicy,
 		normalizeGatewaySearchMode,
-		supportsGatewaySearchMode,
+		resolveChatSearchPolicy,
+		resolveChatSearchUserAction,
+		selectedModelsSupportGatewaySearchMode,
 		type GatewaySearchMode
 	} from '$lib/utils/gatewaySearchMode';
 	import { applyGatewayCompletionMetadata } from '$lib/utils/gatewayCompletionMetadata';
@@ -176,26 +178,29 @@
 	let pendingWebSearchPrompt: string | null = null;
 	let webSearchConfirmed = false;
 
-	$: {
+	const getBuiltinSearchRequested = () => {
 		const currentModels = atSelectedModel?.id ? [atSelectedModel.id] : selectedModels;
 		const allModelsSupportWebSearch =
 			currentModels.filter(
 				(model) => $models.find((m) => m.id === model)?.info?.meta?.capabilities?.web_search ?? true
 			).length === currentModels.length;
 
-		webSearchActive = Boolean(
+		return Boolean(
 			$config?.features?.enable_web_search &&
 			($user?.role === 'admin' || $user?.permissions?.features?.web_search) &&
 			(webSearchEnabled ||
 				(allModelsSupportWebSearch && ($settings?.webSearch ?? false) === 'always'))
 		);
-	}
+	};
 
-	$: gatewaySearchAvailable =
-		selectedModelIds.length > 0 &&
-		selectedModelIds.every((id) =>
-			supportsGatewaySearchMode($models.find((model) => model.id === id))
-		);
+	$: gatewaySearchAvailable = selectedModelsSupportGatewaySearchMode(selectedModelIds, $models);
+
+	$: webSearchActive = resolveChatSearchPolicy({
+		gatewayMode: gatewaySearchMode,
+		builtinSearchEnabled: getBuiltinSearchRequested(),
+		providerSupportsGatewaySearch: gatewaySearchAvailable,
+		conflictPreference: 'gateway'
+	}).builtinSearchEnabled;
 
 	const openWebSearchConfirm = () => {
 		window.setTimeout(() => {
@@ -203,7 +208,45 @@
 		}, 0);
 	};
 
+	const handleGatewaySearchModeChange = (mode: GatewaySearchMode) => {
+		const builtinSearchWasEnabled = getBuiltinSearchRequested();
+		const policy = resolveChatSearchUserAction({
+			action: { type: 'gateway_mode', mode },
+			gatewayMode: gatewaySearchMode,
+			builtinSearchEnabled: builtinSearchWasEnabled,
+			providerSupportsGatewaySearch: gatewaySearchAvailable
+		});
+
+		gatewaySearchMode = policy.gatewayMode;
+		webSearchEnabled = policy.builtinSearchEnabled;
+
+		if (policy.conflictResolved && policy.searchOwner === 'gateway') {
+			toast.info(
+				$i18n.t('Open WebUI Web Search was turned off because Gateway Web Search is enabled.')
+			);
+		}
+	};
+
 	const handleWebSearchToggle = (enabled: boolean) => {
+		const gatewaySearchWasEnabled = gatewaySearchMode !== 'off';
+		const policy = resolveChatSearchUserAction({
+			action: { type: 'builtin_toggle', enabled },
+			gatewayMode: gatewaySearchMode,
+			builtinSearchEnabled: getBuiltinSearchRequested(),
+			providerSupportsGatewaySearch: gatewaySearchAvailable
+		});
+
+		// The child binding and this callback can run in the same Svelte cycle. Commit both
+		// resolved values here so an immediate send cannot observe the previous parent state.
+		gatewaySearchMode = policy.gatewayMode;
+		webSearchEnabled = policy.builtinSearchEnabled;
+
+		if (gatewaySearchWasEnabled && policy.searchOwner === 'openwebui_builtin') {
+			toast.info(
+				$i18n.t('Gateway Web Search was turned off because Open WebUI Web Search is enabled.')
+			);
+		}
+
 		if (enabled && $config?.features?.enable_web_search_confirmation && !webSearchConfirmed) {
 			webSearchEnabled = false;
 			pendingWebSearchPrompt = null;
@@ -220,6 +263,25 @@
 	$: if (!webSearchActive) {
 		resetWebSearchConfirmation();
 	}
+
+	const normalizeLoadedSearchPolicy = () => {
+		const selectedModelsAreResolved =
+			selectedModelIds.length > 0 &&
+			selectedModelIds.every((id) => $models.some((model) => model.id === id));
+		if (!selectedModelsAreResolved) return;
+
+		// Built-in search wins legacy persisted conflicts because it predates the Gateway control.
+		const policy = resolveChatSearchPolicy({
+			gatewayMode: gatewaySearchMode,
+			builtinSearchEnabled: getBuiltinSearchRequested(),
+			providerSupportsGatewaySearch: selectedModelsSupportGatewaySearchMode(
+				selectedModelIds,
+				$models
+			),
+			conflictPreference: 'openwebui_builtin'
+		});
+		gatewaySearchMode = policy.gatewayMode;
+	};
 
 	let showCommands = false;
 
@@ -330,6 +392,7 @@
 			} else {
 				await setDefaults();
 			}
+			normalizeLoadedSearchPolicy();
 
 			const chatInput = document.getElementById('chat-input');
 			chatInput?.focus();
@@ -395,9 +458,12 @@
 		onSelectedModelIdsChange();
 	}
 
-	const onSelectedModelIdsChange = () => {
-		resetInput();
+	const onSelectedModelIdsChange = async () => {
 		oldSelectedModelIds = structuredClone(selectedModelIds);
+		// Model changes use the safe fallback instead of carrying a hidden Gateway mode across providers.
+		gatewaySearchMode = 'off';
+		await resetInput();
+		normalizeLoadedSearchPolicy();
 	};
 
 	const resetInput = async () => {
@@ -1048,6 +1114,7 @@
 					}
 				} catch (e) {}
 			}
+			normalizeLoadedSearchPolicy();
 
 			const chatInput = document.getElementById('chat-input');
 			chatInput?.focus();
@@ -2398,7 +2465,7 @@
 		}
 	};
 
-	const getFeatures = () => {
+	const getFeatures = (resolvedWebSearchEnabled = webSearchActive) => {
 		let features = {};
 
 		if ($config?.features)
@@ -2414,7 +2481,7 @@
 					($user?.role === 'admin' || $user?.permissions?.features?.code_interpreter)
 						? codeInterpreterEnabled
 						: false,
-				web_search: webSearchActive
+				web_search: resolvedWebSearchEnabled
 			};
 
 		if ($settings?.memory ?? $config?.features?.enable_memories ?? false) {
@@ -2582,13 +2649,20 @@
 
 		// Only send terminal_id if the model has terminal capability enabled
 		const terminalEnabled = model.info?.meta?.capabilities?.terminal ?? true;
+		const searchPolicy = getChatSearchRequestPolicy(
+			selectedModelIds,
+			$models,
+			gatewaySearchMode,
+			webSearchActive
+		);
+		gatewaySearchMode = searchPolicy.gatewayMode;
 
 		const res = await generateOpenAIChatCompletion(
 			localStorage.token,
 			{
 				stream: stream,
 				model: model.id,
-				...getGatewaySearchModeField(selectedModelIds, $models, gatewaySearchMode),
+				...searchPolicy.gatewaySearchModeField,
 				...(messages.length > 0 ? { messages } : {}),
 				params: {
 					...$settings?.params,
@@ -2609,7 +2683,7 @@
 					// Direct terminal servers — always included when enabled (not routed through selectedToolIds)
 					...($terminalServers ?? []).filter((t) => !t.id)
 				],
-				features: getFeatures(),
+				features: getFeatures(searchPolicy.builtinSearchEnabled),
 				variables: {
 					...getPromptVariables(
 						$user?.name,
@@ -3403,6 +3477,7 @@
 											}
 										}}
 										onWebSearchToggle={handleWebSearchToggle}
+										onGatewaySearchModeChange={handleGatewaySearchModeChange}
 										on:submit={async (e) => {
 											clearDraft($chatId);
 											if (e.detail || files.length > 0) {
@@ -3447,6 +3522,7 @@
 									{onSelect}
 									{onUpload}
 									onWebSearchToggle={handleWebSearchToggle}
+									onGatewaySearchModeChange={handleGatewaySearchModeChange}
 									onChange={(data) => {
 										if (!$temporaryChatEnabled) {
 											saveDraft(data);

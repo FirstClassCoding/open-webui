@@ -1132,6 +1132,8 @@
 	"Functions allow arbitrary code execution.": "ฟังก์ชันอนุญาตให้รันโค้ดได้อย่างอิสระ",
 	"Functions imported successfully": "นำเข้าฟังก์ชันสำเร็จแล้ว",
 	"Gateway Web Search": "การค้นเว็บผ่าน Gateway",
+	"Gateway Web Search was turned off because Open WebUI Web Search is enabled.": "ตั้ง Gateway Web Search เป็นปิดแล้ว เนื่องจากใช้การค้นเว็บของ Open WebUI",
+	"Open WebUI Web Search was turned off because Gateway Web Search is enabled.": "ปิดการค้นเว็บของ Open WebUI แล้ว เนื่องจากใช้ Gateway Web Search",
 	"Gemini": "Gemini",
 	"Gemini API Key": "API Key ของ Gemini",
 	"Gemini API Key is required.": "ต้องระบุคีย์ Gemini API",

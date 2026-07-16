@@ -64,6 +64,7 @@
 	export let onSelect = (e) => {};
 	export let onChange = (e) => {};
 	export let onWebSearchToggle: Function = () => {};
+	export let onGatewaySearchModeChange: (mode: GatewaySearchMode) => void = () => {};
 
 	export let toolServers = [];
 
@@ -251,6 +252,7 @@
 						{onChange}
 						{onUpload}
 						{onWebSearchToggle}
+						{onGatewaySearchModeChange}
 						on:submit={(e) => {
 							dispatch('submit', e.detail);
 						}}

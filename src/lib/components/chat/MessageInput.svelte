@@ -112,6 +112,7 @@
 	export let onUpload: Function = (e) => {};
 	export let onChange: Function = () => {};
 	export let onWebSearchToggle: Function = () => {};
+	export let onGatewaySearchModeChange: (mode: GatewaySearchMode) => void = () => {};
 
 	export let createMessagePair: Function;
 	export let stopResponse: Function;
@@ -1760,7 +1761,10 @@
 
 									<div class="flex flex-1 items-center min-w-0 overflow-x-auto scrollbar-none">
 										{#if gatewaySearchAvailable}
-											<GatewaySearchMenu bind:mode={gatewaySearchMode} />
+											<GatewaySearchMenu
+												bind:mode={gatewaySearchMode}
+												onModeChange={onGatewaySearchModeChange}
+											/>
 										{/if}
 
 										{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
@@ -1932,7 +1936,10 @@
 											{#if webSearchEnabled}
 												<Tooltip content={$i18n.t('Web Search')} placement="top">
 													<button
-														on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
+														on:click|preventDefault={() => {
+															webSearchEnabled = false;
+															onWebSearchToggle(false);
+														}}
 														type="button"
 														class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
 														($settings?.webSearch ?? false) === 'always'

@@ -14,6 +14,7 @@
 	const i18n = getContext('i18n');
 
 	export let mode: GatewaySearchMode = 'off';
+	export let onModeChange: (mode: GatewaySearchMode) => void = () => {};
 
 	let show = false;
 
@@ -31,6 +32,7 @@
 
 	const selectMode = (value: unknown) => {
 		mode = normalizeGatewaySearchMode(value);
+		onModeChange(mode);
 		show = false;
 	};
 </script>

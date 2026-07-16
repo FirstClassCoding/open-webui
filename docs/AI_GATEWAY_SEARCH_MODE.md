@@ -1,4 +1,4 @@
-# AI Gateway Search Mode (Phases 4A and 4B)
+# AI Gateway Search Mode (Phases 4A, 4B, and 4C)
 
 Phase 4A adds a compact **Gateway Web Search** selector to the main chat composer. It sends the selected mode to a compatible AI Gateway connection without changing Open WebUI's built-in web search.
 
@@ -36,9 +36,26 @@ No Gateway URL, model name, or credential is hardcoded. Invalid or untrusted sto
 
 The selected value is stored once in the existing chat JSON as `gateway_search_mode`; no database migration is required. Existing chats remain compatible and default to `off`.
 
-## Built-in web search
+## Search ownership (Phase 4C)
 
-Gateway Web Search and Open WebUI's built-in web search are separate systems. Phase 4A does not change the built-in search toggle or run searches inside Open WebUI. Avoid enabling both for the same request until a double-search policy is defined.
+Gateway Web Search and Open WebUI's built-in web search remain separate systems, but Phase 4C gives every main completion request exactly one search owner:
+
+| Gateway mode | Built-in search | Request owner       |
+| ------------ | --------------- | ------------------- |
+| `off`        | Off             | `none`              |
+| `off`        | On              | `openwebui_builtin` |
+| `on`         | Off             | `gateway`           |
+| `auto`       | Off             | `gateway`           |
+
+Selecting Gateway `on` or `auto` turns built-in search off. Turning built-in search on changes Gateway mode to `off`. A short toast explains changes caused by an explicit user action; normalization during load is silent.
+
+The built-in toggle callback synchronously commits both resolved values to the parent chat state. The visible built-in state and `features.web_search` must therefore agree even when the user sends immediately after toggling. Gateway `off` does not by itself mean that no search owner exists: built-in search can own the request with `search_mode=off` and `features.web_search=true`. The defensive request guard always evaluates both values.
+
+The same policy helper is used by the composer and immediately before the main completion payload is created. The request guard prevents `features.web_search=true` from being sent with Gateway `search_mode=on|auto`. Gateway-capable providers receive `search_mode=off` when built-in search owns the request. Unsupported providers, Direct Ollama, Responses API connections, and mixed-model selections do not receive `search_mode`.
+
+`gateway_search_mode` continues to use the existing chat JSON. Draft state continues to use Open WebUI's existing session storage, so no migration is required. If an old chat or draft contains a conflict, built-in search has priority because it is the older persisted feature. Model/provider switches use the safe `off` fallback instead of carrying a hidden Gateway mode to another provider. Temporary chats apply the same policy in memory.
+
+Send, edit/resend, regenerate, continue, and retry converge on the guarded main completion path and use the current chat state. Internal and background tasks do not receive Gateway mode. Gateway `auto` remains the owner when it resolves to Used, Skipped, Fallback, No Results, or Error; neither search system automatically falls back to the other.
 
 ## Response metadata (Phase 4B)
 
@@ -70,7 +87,7 @@ The detail tooltip can show requested and resolved modes, status, decision reaso
 
 ### Gateway sources
 
-Gateway sources are shown in a separate collapsible list and remain distinct from Open WebUI built-in citations. They are ordered by `index` so `[1]`, `[2]`, and later references remain aligned with the Gateway answer. Only absolute `http://` and `https://` URLs are clickable; links open in a new tab with `noopener noreferrer`. Titles are rendered as text, snippets are not invented, and no page is fetched again.
+Gateway sources are shown in a separate collapsible list and remain distinct from Open WebUI built-in citations. They are ordered by `index` so `[1]`, `[2]`, and later references remain aligned with the Gateway answer. Only absolute `http://` and `https://` URLs are clickable; links open in a new tab with `noopener noreferrer`. Titles are rendered as text, snippets are not invented, and no page is fetched again. Phase 4C does not merge the source lists or citation indexes.
 
 The built-in `Citations` component was not reused because it expects document/snippet metadata that the Gateway source contract does not provide.
 
@@ -92,8 +109,10 @@ Malformed, negative, non-finite, or incorrectly typed metric values are ignored 
 
 ## Current limitations
 
-Phase 4B presents the metadata already returned by the AI Gateway. It does not change the Phase 4A request contract, Gateway heuristic, or search context prompt.
+Phases 4B and 4C present metadata and coordinate request ownership in Open WebUI. They do not change the Phase 4A Gateway contract, Gateway heuristic, search context prompt, or either search provider.
 
 The Gateway still uses bounded SearXNG snippets rather than full-page extraction. Phase 4B does not verify that every answer claim is supported by its citation and does not make inline `[1]` references clickable.
 
-The double-search policy between Gateway Web Search and Open WebUI built-in search remains Phase 4C work. Usage/API key pages and monitoring redesign are also outside this phase.
+Mixed-model chats intentionally disable Gateway mode when any selected model lacks the capability. There is no automatic cross-provider search fallback and no restoration of a previous Gateway mode after a provider switch; the safe fallback is `off`.
+
+Usage/API key pages, monitoring redesign, inline citation links, and full-page extraction remain outside these phases.

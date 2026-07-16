@@ -1139,6 +1139,8 @@
 	"Functions allow arbitrary code execution.": "",
 	"Functions imported successfully": "",
 	"Gateway Web Search": "",
+	"Gateway Web Search was turned off because Open WebUI Web Search is enabled.": "",
+	"Open WebUI Web Search was turned off because Gateway Web Search is enabled.": "",
 	"Gemini": "",
 	"Gemini API Key": "",
 	"Gemini API Key is required.": "",
